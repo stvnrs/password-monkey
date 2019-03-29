@@ -1,4 +1,24 @@
 ﻿$Script:Passwords = @{};
+$Script:PasswordTimeout = 5
+
+function ClearPasswordFromClipboard{
+    param (
+        [pscredential]$PasswordCredential
+    )
+    
+    $Script = @"
+    {
+        Add-Type -AssemblyName 'System.Windows.Forms'
+        Start-Sleep -Seconds $Script:PasswordTimeout
+
+        if((Get-Clipboard) -eq '$($PasswordCredential.GetNetworkCredential().Password)'){
+            [System.Windows.Forms.Clipboard]::Clear()         
+        }        
+    }.Invoke()
+"@    
+    
+    Start-Process -FilePath powershell -ArgumentList $Script -WindowStyle 'Hidden'
+}
 
 <#
     .SYNOPSIS
@@ -14,15 +34,15 @@
     .EXAMPLE
         Pops up the credential window for secure input add stores the result
         
-        New-Password -Name 'mono'
+        Add-Password -Name 'mono'
 
     .EXAMPLE
         Stores a copy of the supplied credential
             
         $Credential = Get-Credential;
-        New-Password -Name 'mono' -Credential $Credential          
+        Add-Password -Name 'mono' -Credential $Credential          
 #>
-function New-Password {
+function Add-Password {
     [CmdLetBinding()]
     param (
         [Parameter(Mandatory=$true)]
@@ -37,11 +57,11 @@ function New-Password {
     }
     
     if(!$Credential) {
-        $Credential = Get-Credential -Message "Enter credentials for $Name"
+        $Credential = Get-Credential -Message "Enter credentials for $Name" -UserName $Name
     } 
     
     if(!$Credential) {
-        Write-Verbose "New-Password cancelled for $Name"
+        Write-Verbose "Add-Password cancelled for $Name"
     } else {
         Write-Verbose "Saving password $Name ($($Credential.UserName))"
         $Script:Passwords.Add($Name, $Credential);
@@ -95,7 +115,7 @@ function Set-Password {
     )
 
     if(!$Credential){
-        $Credential = Get-Credential -Message "Enter credentials for $Name"
+        $Credential = Get-Credential -Message "Enter credentials for $Name" -UserName $Name
     }
     
     if(!$Credential){
@@ -104,14 +124,14 @@ function Set-Password {
         if($Script:Passwords.ContainsKey($Name)){
             Remove-Password -Name $Name;
         }
-        New-Password -Name $Name -Credential $Credential ;
+        Add-Password -Name $Name -Credential $Credential ;
     }
 }
 
 function Get-Password {
     [CmdLetBinding()]
     param (
-        [Parameter(Mandatory=$true, ParameterSetName='default')]
+        [Parameter(Mandatory=$true, ParameterSetName='default', Position=0)]
         $Name,
         [Parameter(ParameterSetName='list' )]
         [switch]
@@ -121,7 +141,10 @@ function Get-Password {
         $OutputToConsole,
         [Parameter(ParameterSetName='default')]
         [switch]
-        $Force
+        $Force,
+        [Parameter(ParameterSetName='default', Mandatory=$false)]
+        [ValidateRange(1, [int]::MaxValue)]
+        [int]$Char # one based 
     )
 
     switch ($PsCmdlet.ParameterSetName) 
@@ -130,6 +153,14 @@ function Get-Password {
              Write-verbose "Getting password $Name"
              
              $Password = $Passwords[$Name].GetNetworkCredential().Password
+
+             if($Char -ge 1){
+                 if($Char -gt $Password.Length){
+                    throw "`$Char should be less than $($Password.Length)"
+                 } else {
+                    $Password = $password[$Char - 1]                      
+                 }
+             }
              
              if($OutputToConsole){
                 Write-Warning "Be careful out there!";
@@ -137,6 +168,7 @@ function Get-Password {
              } else {
                 Write-verbose "Password copied to clipboard"
                 $Password | Set-Clipboard ;
+                ClearPasswordFromClipboard -PasswordCredential $Passwords[$Name]
              }
              
             Write-verbose "Getting password $Name - done."
@@ -145,7 +177,7 @@ function Get-Password {
         'list'  { 
             Write-Verbose "Listing passwords"
             
-            $Script:Passwords.Keys |  % {[PsCustomObject]@{Name=$_}}
+            $Script:Passwords.Keys |  ForEach-Object {[PsCustomObject]@{Name=$_}}
             
             Write-Verbose "Listing passwords - done."
             break;
@@ -187,7 +219,7 @@ function Clear-Passwords {
 <#
     .EXAMPLE 
         
-        New-Password -Name 'mono' 
+        Add-Password -Name 'mono' 
         Set-PasswordEnvironmentVariable -Name 
         
         # use the environment variable        
@@ -195,7 +227,7 @@ function Clear-Passwords {
     
     .EXAMPLE 
         
-        New-Password -Name 'mono' 
+        Add-Password -Name 'mono' 
         Set-PasswordEnvironmentVariable -Name 'mono' -EnvironmentVariableName 'DatabasePassword'
         
         # use the environment variable
@@ -234,7 +266,7 @@ function Set-PasswordEnvironmentVariable {
     .EXAMPLE
         Cache creds for your azure subscription, and use them to login.
         
-        New-Password -Name 'azure'
+        Add-Password -Name 'azure'
         # enter user name and password in the credentials input box
         Login-AzureRmAccount -Credential (Get-PasswordCredential -Name 'azure')
 
@@ -263,7 +295,7 @@ function Get-PasswordCredential {
         Set a password and then use it a basic auth header with Invoke-RestMethod  
         
         # assume $OtherParams and $Headers have already been set
-        New-Password -Name 'mono'
+        Add-Password -Name 'mono'
         # enter user name and password in the credentials input     box
         $Headers += Get-BasicAuthHeader -Name 'mono'
         
@@ -299,18 +331,19 @@ function Get-PasswordBasicAuthHeader {
     $Headers;
 }
 
+
 function Set-PasswordMonkeyAliases{
     [CmdLetBinding()]
     param (
     )
 
-    if(((get-alias) | where {$_.Name -eq 'gpwd'}) -eq $null){
+    if($null -eq ((get-alias) | Where-Object {$_.Name -eq 'gpwd'})){
         New-Alias -Name 'gpwd' -Value 'PasswordMonkey\Get-Password' -Description 'Gets a password' -Scope 'Global'
     } else {
         Write-Warning "Cannot set alias gpwd as it already exists"
     }
 
-    if(((get-alias) | where {$_.Name -eq 'spwd'}) -eq $null){
+    if($null -eq ((get-alias) | Where-Object {$_.Name -eq 'spwd'}) ){
         New-Alias -Name 'spwd' -Value 'PasswordMonkey\Set-Password' -Description 'Sets a password' -Scope 'Global'
     } else {
         Write-Warning "Cannot set alias spwd as it already exists"

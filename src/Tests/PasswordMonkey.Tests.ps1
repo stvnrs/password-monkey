@@ -44,8 +44,8 @@ Describe "Get-Password" {
         $Credential =  Get-TestCredential -Username $UserName -Password $Password; 
 
         New-Password -Name $PasswordName -Credential $Credential;
-        (Get-Password | Where Name -eq $PasswordName)  | Should Not BeNullOrEmpty;
-        ((Get-Password | Where Name -eq $PasswordName) | Measure-Object).Count   | Should Be 1;
+        (Get-Password | Where-Object Name -eq $PasswordName)  | Should Not BeNullOrEmpty;
+        ((Get-Password | Where-Object Name -eq $PasswordName) | Measure-Object).Count   | Should Be 1;
         Get-Password -Name $PasswordName;
         Get-Clipboard  | Should be $Password;
      }
